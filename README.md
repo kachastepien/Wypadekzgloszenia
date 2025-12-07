@@ -55,8 +55,8 @@ Nasz system spełnia wszystkie założenia opisane w wymaganiach I etapu:
 Aby sprawdzić działanie systemu, polecamy przejście następującej ścieżki (tzw. Happy Path):
 
 1.  **Start:** Wejdź na [https://fray-campus-59931131.figma.site/](https://fray-campus-59931131.figma.site/).
-2.  **Wybór:** Kliknij "Rozpocznij nowe zgłoszenie" -> Wybierz "Zawiadomienie o wypadku".
-3.  **Dane firmy:**
+2.  **Zgłoszenie:** Rozpocznij zgłoszenie z poziomu asystenta lub formularza
+3.  **Dane firmy dla formularza:**
     *   Wpisz testowy NIP (możesz użyć dowolnego, np. `1234567890` lub skorzystać z prawdziwego).
     *   Kliknij **"Pobierz dane z CEIDG"**. Zobacz, jak system uzupełnia nazwę i PKD.
 4.  **Asystent AI (Opcjonalnie):**
