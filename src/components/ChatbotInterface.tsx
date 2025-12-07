@@ -111,21 +111,26 @@ export function ChatbotInterface() {
 
   const handleSuggestionClick = async (suggestion: string) => {
     if (suggestion === "Pobierz PDF teraz") {
-        setIsPdfGenerating(true);
-        try {
-            await generateReportPDF(data);
-            toast.success("Dokument został pobrany.");
-        } catch (e) {
-            toast.error("Błąd generowania PDF.");
-        } finally {
-            setIsPdfGenerating(false);
-        }
+        await handleDirectDownload();
         return;
     }
 
     setInput(suggestion);
     // Opcjonalnie można od razu wysłać, ale lepiej dać użytkownikowi możliwość edycji
     // handleSend(); 
+  };
+
+  const handleDirectDownload = async () => {
+      setIsPdfGenerating(true);
+      try {
+          await generateReportPDF(data);
+          toast.success("Dokument został pobrany.");
+      } catch (e) {
+          toast.error("Błąd generowania PDF.");
+          console.error(e);
+      } finally {
+          setIsPdfGenerating(false);
+      }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -394,10 +399,10 @@ export function ChatbotInterface() {
                 <div className="flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
                   <div>
-                    <h4 className="text-sm text-amber-900 mb-2">Uwagi</h4>
-                    <ul className="text-sm text-amber-800 space-y-1">
+                    <h4 className="text-sm font-medium text-amber-900 mb-2">Brakuje jeszcze:</h4>
+                    <ul className="text-sm text-amber-800 space-y-1.5 list-disc pl-4">
                       {data.missingElements.slice(0, 3).map((element, index) => (
-                        <li key={index}>• {element}</li>
+                        <li key={index} className="pl-1">{element}</li>
                       ))}
                     </ul>
                   </div>
@@ -405,23 +410,32 @@ export function ChatbotInterface() {
               </div>
             )}
 
-            {progress === 100 && (
-              <div className="bg-gray-900 text-white rounded-xl p-4">
-                <div className="flex items-start gap-2 mb-3">
-                  <CheckCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <h4 className="mb-1">Gotowe!</h4>
-                    <p className="text-sm text-gray-300">
-                      Możesz pobrać dokument
-                    </p>
-                  </div>
+            {/* Sekcja Pobierania - Zawsze widoczna */}
+            <div className="bg-gray-900 text-white rounded-xl p-4 mt-6">
+              <div className="flex items-start gap-2 mb-3">
+                {progress === 100 ? (
+                  <CheckCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-green-400" />
+                ) : (
+                  <Download className="w-5 h-5 flex-shrink-0 mt-0.5 text-blue-400" />
+                )}
+                <div>
+                  <h4 className="mb-1 font-semibold">{progress === 100 ? 'Gotowe!' : 'Wersja Robocza'}</h4>
+                  <p className="text-sm text-gray-300 leading-tight">
+                    {progress === 100 
+                      ? 'Możesz pobrać finalny dokument.' 
+                      : 'Możesz pobrać szkic w każdej chwili.'}
+                  </p>
                 </div>
-                <button className="w-full bg-white text-gray-900 px-4 py-2.5 rounded-lg hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 text-sm">
-                  <Download className="w-4 h-4" />
-                  Pobierz PDF
-                </button>
               </div>
-            )}
+              <Button 
+                onClick={handleDirectDownload}
+                disabled={isPdfGenerating}
+                className="w-full bg-white text-gray-900 hover:bg-gray-100 hover:text-gray-900 px-4 py-2.5 rounded-lg transition-colors flex items-center justify-center gap-2 text-sm font-medium border-none"
+              >
+                {isPdfGenerating ? <Loader2 className="w-4 h-4 animate-spin"/> : <Download className="w-4 h-4" />}
+                {progress === 100 ? 'Pobierz Raport PDF' : 'Pobierz Szkic PDF'}
+              </Button>
+            </div>
           </div>
 
           <div className="mt-6 pt-6 border-t border-gray-100">

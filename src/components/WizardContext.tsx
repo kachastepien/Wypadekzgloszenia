@@ -156,46 +156,46 @@ export function WizardProvider({ children }: { children: ReactNode }) {
 
     // Sprawdzenie pełnomocnictwa
     if (data.isProxy && !data.hasProxyDocument) {
-      missing.push('Pełnomocnictwo do reprezentowania poszkodowanego');
+      missing.push('Pełnomocnictwo (dokument)');
       documents.push('Pełnomocnictwo (oryginał lub urzędowo poświadczony odpis)');
     }
 
     // Sprawdzenie danych działalności
     if (!data.nip && !data.regon) {
-      missing.push('NIP lub REGON działalności gospodarczej');
+      missing.push('Dane firmy (NIP/REGON)');
     }
 
     // Sprawdzenie elementów wypadku
     if (data.wasSudden === 'nie') {
-      recommendations.push('Zdarzenie może nie spełniać kryterium nagłości wypadku przy pracy');
+      recommendations.push('Wypadek musi być nagły. Opisz, co wydarzyło się niespodziewanie.');
     }
 
     if (!data.externalCause || data.externalCause === 'brak') {
-      missing.push('Przyczyna zewnętrzna zdarzenia');
-      recommendations.push('Należy szczegółowo opisać przyczynę zewnętrzną wypadku');
+      missing.push('Co spowodowało wypadek? (Przyczyna)');
+      recommendations.push('Wskaż przyczynę zewnętrzną (np. śliska podłoga, awaria maszyny).');
     }
 
     if (!data.injuryDescription) {
-      missing.push('Szczegółowy opis obrażeń');
+      missing.push('Opis urazu (co się stało?)');
     }
 
     if (data.wasWorkRelated === 'nie') {
-      recommendations.push('UWAGA: Zdarzenie może nie zostać uznane za wypadek przy pracy - nie było związane z wykonywaną działalnością gospodarczą');
+      recommendations.push('Aby uznać wypadek przy pracy, zdarzenie musi mieć związek z działalnością firmy.');
     }
 
     // Dokumenty medyczne
     if (data.medicalAttention === 'tak') {
-      documents.push('Karta informacyjna ze szpitala lub zaświadczenie lekarskie o obrażeniach');
+      documents.push('Karta informacyjna ze szpitala lub zaświadczenie lekarskie');
     }
 
     // Brak sekwencji zdarzeń
     if (data.accidentSequence.length < 2) {
-      missing.push('Szczegółowy opis przebiegu wypadku (sekwencja zdarzeń)');
+      missing.push('Dokładny przebieg zdarzenia (krok po kroku)');
     }
 
     // Brak aktywności przed wypadkiem
     if (!data.activityBeforeAccident) {
-      missing.push('Opis czynności wykonywanych przed wypadkiem');
+      missing.push('Co robiono tuż przed wypadkiem?');
     }
 
     // Dodatkowe dokumenty
