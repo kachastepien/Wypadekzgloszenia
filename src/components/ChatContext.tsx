@@ -1,28 +1,30 @@
 import { createContext, useContext, useState, ReactNode } from 'react';
-import { ChatMessage } from './ChatbotLogic';
+
+export interface ChatMessage {
+  id: string;
+  role: 'bot' | 'user';
+  content: string;
+  timestamp: Date;
+  suggestions?: string[];
+  data?: Record<string, any>;
+}
 
 interface ChatContextType {
   messages: ChatMessage[];
   addMessage: (message: ChatMessage) => void;
   setMessages: (messages: ChatMessage[]) => void;
-  currentQuestion: number;
-  setCurrentQuestion: (question: number) => void;
   isTyping: boolean;
   setIsTyping: (typing: boolean) => void;
   input: string;
   setInput: (input: string) => void;
-  useLangflow: boolean;
-  setUseLangflow: (use: boolean) => void;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [currentQuestion, setCurrentQuestion] = useState(0);
   const [isTyping, setIsTyping] = useState(false);
   const [input, setInput] = useState('');
-  const [useLangflow, setUseLangflow] = useState(false);
 
   const addMessage = (message: ChatMessage) => {
     setMessages(prev => [...prev, message]);
@@ -33,14 +35,10 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       messages,
       addMessage,
       setMessages,
-      currentQuestion,
-      setCurrentQuestion,
       isTyping,
       setIsTyping,
       input,
       setInput,
-      useLangflow,
-      setUseLangflow
     }}>
       {children}
     </ChatContext.Provider>

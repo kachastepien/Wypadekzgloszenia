@@ -1,11 +1,10 @@
-import { useState, useRef, useEffect } from 'react';
+import { useRef, useEffect } from 'react';
 import { useWizard } from './WizardContext';
-import { useChat } from './ChatContext';
-import { Send, Bot, User, Sparkles, CheckCircle, AlertCircle, Download, Settings, Zap, Save, Loader2 } from 'lucide-react';
-import { ChatMessage, chatbotLogic } from './ChatbotLogic';
-import { langflowService } from '../services/langflowService';
-import { LangflowConfig } from './LangflowConfig';
+import { useChat, ChatMessage } from './ChatContext';
+import { Send, Bot, User, Sparkles, CheckCircle, AlertCircle, Download, Save, Loader2, Zap } from 'lucide-react';
+import { openaiService } from '../services/openaiService';
 import { Button } from './ui/button';
+import { toast } from 'sonner@2.0.3';
 
 export function ChatbotInterface() {
   const { data, updateData, analyzeCompleteness, saveProgress, isSaving } = useWizard();
@@ -14,11 +13,8 @@ export function ChatbotInterface() {
     messages, setMessages, 
     input, setInput,
     isTyping, setIsTyping,
-    currentQuestion, setCurrentQuestion,
-    useLangflow, setUseLangflow 
   } = useChat();
 
-  const [showConfig, setShowConfig] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -32,35 +28,17 @@ export function ChatbotInterface() {
   // Inicjalizacja chatbota
   useEffect(() => {
     if (messages.length === 0) {
-        const configured = langflowService.isConfigured();
-        setUseLangflow(configured);
-
         const welcomeMessage: ChatMessage = {
           id: '1',
           role: 'bot',
-          content: configured 
-            ? 'Cześć! Jestem asystentem ZUS z AI. Pomogę Ci przygotować zgłoszenie wypadku przy pracy. Możesz rozmawiać ze mną naturalnie - odpowiem na Twoje pytania i pomogę wypełnić formularz. Gotowy?'
-            : 'Cześć! Jestem asystentem ZUS. Pomogę Ci przygotować zgłoszenie wypadku przy pracy.\n\nBędę zadawać pytania, odpowiadaj naturalnie. Gotowy?',
+          content: 'Dzień dobry! Jestem asystentem ZUS. Pomogę Ci przygotować zgłoszenie wypadku przy pracy lub wyjaśnienia poszkodowanego.\n\nMożesz pisać do mnie w języku naturalnym, a ja poprowadzę Cię przez cały proces. Na początek powiedz, co chcesz przygotować: zawiadomienie o wypadku, czy tylko wyjaśnienia?',
           timestamp: new Date(),
+          suggestions: ['Zawiadomienie o wypadku', 'Wyjaśnienia poszkodowanego', 'Oba dokumenty'],
         };
 
-        const firstQuestion: ChatMessage = {
-          id: '2',
-          role: 'bot',
-          content: 'Co chcesz przygotować?\n\n1. Zawiadomienie o wypadku\n2. Wyjaśnienia poszkodowanego\n3. Oba dokumenty',
-          timestamp: new Date(),
-          suggestions: ['Zawiadomienie o wypadku', 'Wyjaśnienia', 'Oba'],
-        };
-
-        setMessages([welcomeMessage, firstQuestion]);
+        setMessages([welcomeMessage]);
     }
   }, []);
-
-  const simulateTyping = async (delay: number = 800) => {
-    setIsTyping(true);
-    await new Promise(resolve => setTimeout(resolve, delay));
-    setIsTyping(false);
-  };
 
   const handleSend = async () => {
     if (!input.trim()) return;
@@ -73,124 +51,60 @@ export function ChatbotInterface() {
       timestamp: new Date(),
     };
 
-    setMessages([...messages, userMessage]);
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
     const userInput = input;
     setInput('');
-
-    await simulateTyping();
+    setIsTyping(true);
 
     try {
-      let botResponse: string;
-      let extractedData: Record<string, any> = {};
+      // Konwersja historii czatu do formatu OpenAI
+      const chatHistory = newMessages.map(m => ({
+        role: m.role === 'user' ? 'user' as const : 'assistant' as const,
+        content: m.content
+      }));
 
-      if (useLangflow) {
-        // Użyj Langflow
-        botResponse = await langflowService.sendMessage(userInput, data);
-        
-        // Spróbuj wyodrębnić dane z odpowiedzi AI
-        extractedData = extractDataFromAIResponse(botResponse, userInput);
-        
-        // Zaktualizuj dane jeśli coś wyodrębniono
-        if (Object.keys(extractedData).length > 0) {
-          updateData(extractedData);
-        }
-      } else {
-        // Użyj lokalnej logiki
-        const response = chatbotLogic.processUserResponse(userInput, currentQuestion, data, updateData);
-        botResponse = response.message;
-        
-        if (response.data) {
-          extractedData = response.data;
-        }
-        
-        setCurrentQuestion(response.nextQuestion);
+      // Wywołanie serwisu OpenAI
+      const response = await openaiService.sendMessage(chatHistory, data);
 
-        if (response.isComplete) {
-          analyzeCompleteness();
-        }
-
-        // Dodaj sugestie z lokalnej logiki
-        const botMessage: ChatMessage = {
-          id: (Date.now() + 1).toString(),
-          role: 'bot',
-          content: botResponse,
-          timestamp: new Date(),
-          suggestions: response.suggestions,
-          data: extractedData,
-        };
-
-        setMessages([...messages, userMessage, botMessage]);
-        return;
+      // Aktualizacja danych formularza jeśli zostały wyodrębnione
+      if (response.extractedData && Object.keys(response.extractedData).length > 0) {
+        updateData(response.extractedData);
+        analyzeCompleteness();
       }
 
-      // Dla Langflow - bez sugestii, tylko odpowiedź
+      // Dodanie odpowiedzi bota
       const botMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'bot',
-        content: botResponse,
+        content: response.message,
         timestamp: new Date(),
-        data: Object.keys(extractedData).length > 0 ? extractedData : undefined,
+        suggestions: response.suggestions,
+        data: Object.keys(response.extractedData).length > 0 ? response.extractedData : undefined,
       };
 
-      setMessages([...messages, userMessage, botMessage]);
+      setMessages([...newMessages, botMessage]);
     } catch (error) {
       console.error('Błąd chatbota:', error);
+      toast.error("Wystąpił problem z połączeniem z asystentem.");
       
       const errorMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'bot',
-        content: 'Przepraszam, wystąpił problem z połączeniem. Czy chcesz przełączyć się na tryb lokalny?',
+        content: 'Przepraszam, wystąpił chwilowy problem z połączeniem. Proszę spróbuj ponownie za chwilę.',
         timestamp: new Date(),
-        suggestions: ['Przełącz na tryb lokalny'],
       };
 
-      setMessages([...messages, userMessage, errorMessage]);
+      setMessages([...newMessages, errorMessage]);
+    } finally {
+      setIsTyping(false);
     }
-  };
-
-  // Funkcja do wyodrębniania danych z odpowiedzi AI
-  const extractDataFromAIResponse = (response: string, userInput: string): Record<string, any> => {
-    const extracted: Record<string, any> = {};
-
-    // Proste heurystyki - możesz rozbudować
-    const lowerResponse = response.toLowerCase();
-    const lowerInput = userInput.toLowerCase();
-
-    // Wykryj PESEL
-    const peselMatch = userInput.match(/\d{11}/);
-    if (peselMatch && lowerResponse.includes('pesel')) {
-      extracted.injuredPesel = peselMatch[0];
-    }
-
-    // Wykryj NIP
-    const nipMatch = userInput.match(/\d{10}/);
-    if (nipMatch && lowerResponse.includes('nip')) {
-      extracted.nip = nipMatch[0];
-    }
-
-    // Wykryj datę
-    const dateMatch = userInput.match(/\d{4}-\d{2}-\d{2}/);
-    if (dateMatch && (lowerResponse.includes('data') || lowerResponse.includes('wypadku'))) {
-      extracted.accidentDate = dateMatch[0];
-    }
-
-    // Wykryj email
-    const emailMatch = userInput.match(/[^\s@]+@[^\s@]+\.[^\s@]+/);
-    if (emailMatch) {
-      extracted.injuredEmail = emailMatch[0];
-    }
-
-    return extracted;
   };
 
   const handleSuggestionClick = (suggestion: string) => {
-    if (suggestion === 'Przełącz na tryb lokalny') {
-      setUseLangflow(false);
-      setMessages([]);
-      setCurrentQuestion(0);
-      return;
-    }
     setInput(suggestion);
+    // Opcjonalnie można od razu wysłać, ale lepiej dać użytkownikowi możliwość edycji
+    // handleSend(); 
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -198,13 +112,6 @@ export function ChatbotInterface() {
       e.preventDefault();
       handleSend();
     }
-  };
-
-  const handleConfigured = () => {
-    setUseLangflow(langflowService.isConfigured());
-    // Zresetuj konwersację
-    setMessages([]);
-    setCurrentQuestion(0);
   };
 
   // Oblicz postęp
@@ -223,7 +130,7 @@ export function ChatbotInterface() {
       data.injuryType,
       data.injuryDescription,
     ];
-    const filled = fields.filter(f => f && f !== 'brak').length;
+    const filled = fields.filter(f => f && f !== 'brak' && f !== '').length;
     return Math.round((filled / fields.length) * 100);
   };
 
@@ -231,13 +138,6 @@ export function ChatbotInterface() {
 
   return (
     <div className="grid lg:grid-cols-3 gap-8">
-      {showConfig && (
-        <LangflowConfig 
-          onClose={() => setShowConfig(false)} 
-          onConfigured={handleConfigured}
-        />
-      )}
-
       {/* Główny chat */}
       <div className="lg:col-span-2">
         <div className="flex flex-col h-[700px] border border-gray-200 rounded-2xl overflow-hidden">
@@ -245,38 +145,25 @@ export function ChatbotInterface() {
           <div className="border-b border-gray-100 p-6 bg-white">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 ${useLangflow ? 'bg-purple-600' : 'bg-gray-900'} rounded-full flex items-center justify-center`}>
-                  {useLangflow ? (
-                    <Zap className="w-5 h-5 text-white" />
-                  ) : (
-                    <Bot className="w-5 h-5 text-white" />
-                  )}
+                <div className="w-10 h-10 bg-gray-900 rounded-full flex items-center justify-center">
+                  <Zap className="w-5 h-5 text-white" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-gray-900">Asystent ZUS</h3>
-                    {useLangflow && (
-                      <span className="bg-purple-100 text-purple-700 text-xs px-2 py-0.5 rounded-full">
-                        AI
-                      </span>
-                    )}
+                    <h3 className="text-gray-900">Inteligentny Asystent ZUS</h3>
+                    <span className="bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">
+                      AI Powered
+                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="w-1.5 h-1.5 bg-green-500 rounded-full" />
                     <span className="text-gray-400 text-sm">
-                      {useLangflow ? 'Langflow' : 'Lokalny'}
+                      Online
                     </span>
                   </div>
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setShowConfig(true)}
-                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                  title="Konfiguracja Langflow"
-                >
-                  <Settings className="w-5 h-5 text-gray-600" />
-                </button>
                 <div className="text-right">
                   <div className="text-2xl text-gray-900">{progress}%</div>
                   <div className="text-xs text-gray-400">ukończone</div>
@@ -315,12 +202,12 @@ export function ChatbotInterface() {
                         <div className="mt-3 p-3 bg-green-50 border border-green-100 rounded-xl">
                           <div className="flex items-center gap-2 text-green-900 text-sm mb-2">
                             <CheckCircle className="w-3.5 h-3.5" />
-                            <span>Zapisane</span>
+                            <span>Zapisane dane</span>
                           </div>
                           <div className="text-sm text-green-800 space-y-1">
                             {Object.entries(message.data).map(([key, value]) => (
                               <div key={key} className="flex gap-2">
-                                <span className="text-green-600">{key}:</span>
+                                <span className="text-green-600 font-medium">{key}:</span>
                                 <span className="text-green-900">{String(value)}</span>
                               </div>
                             ))}
@@ -334,7 +221,7 @@ export function ChatbotInterface() {
                             <button
                               key={index}
                               onClick={() => handleSuggestionClick(suggestion)}
-                              className="text-sm px-3 py-1.5 bg-gray-50 text-gray-700 rounded-full hover:bg-gray-100 transition-colors border border-gray-200"
+                              className="text-sm px-3 py-1.5 bg-gray-50 text-gray-700 rounded-full hover:bg-gray-100 transition-colors border border-gray-200 text-left"
                             >
                               {suggestion}
                             </button>
@@ -382,12 +269,12 @@ export function ChatbotInterface() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="Wpisz odpowiedź..."
+                placeholder="Napisz wiadomość..."
                 className="flex-1 px-4 py-3 border border-gray-200 rounded-xl focus:ring-1 focus:ring-gray-900 focus:border-gray-900 bg-gray-50"
               />
               <button
                 onClick={handleSend}
-                disabled={!input.trim()}
+                disabled={!input.trim() || isTyping}
                 className="px-5 py-3 bg-gray-900 text-white rounded-xl hover:bg-gray-800 transition-colors disabled:bg-gray-200 disabled:cursor-not-allowed"
               >
                 <Send className="w-5 h-5" />
@@ -507,7 +394,7 @@ export function ChatbotInterface() {
 
           <div className="mt-6 pt-6 border-t border-gray-100">
             <p className="text-xs text-gray-500 leading-relaxed">
-              Odpowiadaj naturalnie. Wszystkie dane są automatycznie zapisywane.
+              Odpowiadaj naturalnie. Wszystkie dane są automatycznie zapisywane w tle. Asystent ZUS pomaga wypełnić formularz zgodnie z przepisami.
             </p>
           </div>
         </div>

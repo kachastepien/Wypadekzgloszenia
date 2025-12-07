@@ -2,6 +2,7 @@ import { Hono } from "npm:hono";
 import { cors } from "npm:hono/cors";
 import { logger } from "npm:hono/logger";
 import * as kv from "./kv_store.tsx";
+import { processChatRequest } from "./openai_logic.ts";
 
 const app = new Hono();
 
@@ -80,6 +81,22 @@ app.get("/make-server-1ba4d8f6/reports", async (c) => {
   } catch (err) {
     console.error("Error listing reports:", err);
     return c.json({ error: "Failed to list reports" }, 500);
+  }
+});
+
+// --- Chat Endpoint ---
+app.post("/make-server-1ba4d8f6/chat", async (c) => {
+  try {
+    const body = await c.req.json();
+    if (!body || !body.messages) {
+      return c.json({ error: "Missing messages in body" }, 400);
+    }
+
+    const response = await processChatRequest(body);
+    return c.json(response);
+  } catch (err) {
+    console.error("Error processing chat:", err);
+    return c.json({ error: "Failed to process chat request" }, 500);
   }
 });
 
