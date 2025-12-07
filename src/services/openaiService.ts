@@ -15,6 +15,11 @@ export const openaiService = {
     currentData: WizardData
   ): Promise<ChatResponse> {
     try {
+      if (!projectId) {
+        console.error("Configuration Error: projectId is missing in supabase/info");
+        throw new Error("Configuration Error: projectId is missing");
+      }
+      
       // Filtrujemy dane, aby nie wysyłać zbędnych rzeczy (np. dużych obiektów jeśli takie są)
       // ale wysyłamy wszystko co istotne dla kontekstu
       const response = await fetch(`${BASE_URL}/chat`, {

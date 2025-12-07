@@ -13,7 +13,8 @@ import { CompletionStep } from './components/CompletionStep';
 import { ProgressBar } from './components/ProgressBar';
 import { ProgressPanel } from './components/ProgressPanel';
 import { ChatbotInterface } from './components/ChatbotInterface';
-import { MessageSquare, FileText } from 'lucide-react';
+import { MessageSquare, FileText, ArrowLeft } from 'lucide-react';
+import { toast } from "sonner@2.0.3";
 
 function MainApp() {
   const { data } = useWizard();

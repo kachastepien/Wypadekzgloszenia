@@ -1,10 +1,11 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { useWizard } from './WizardContext';
 import { useChat, ChatMessage } from './ChatContext';
 import { Send, Bot, User, Sparkles, CheckCircle, AlertCircle, Download, Save, Loader2, Zap } from 'lucide-react';
 import { openaiService } from '../services/openaiService';
 import { Button } from './ui/button';
 import { toast } from 'sonner@2.0.3';
+import { generateReportPDF } from '../utils/pdfGenerator';
 
 export function ChatbotInterface() {
   const { data, updateData, analyzeCompleteness, saveProgress, isSaving } = useWizard();
@@ -15,6 +16,7 @@ export function ChatbotInterface() {
     isTyping, setIsTyping,
   } = useChat();
 
+  const [isPdfGenerating, setIsPdfGenerating] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -80,8 +82,14 @@ export function ChatbotInterface() {
         content: response.message,
         timestamp: new Date(),
         suggestions: response.suggestions,
-        data: Object.keys(response.extractedData).length > 0 ? response.extractedData : undefined,
+        data: (response.extractedData && Object.keys(response.extractedData).length > 0) ? response.extractedData : undefined,
       };
+
+      if (response.shouldGeneratePdf) {
+          botMessage.content += "\n\n[SYSTEM: Dokument PDF jest gotowy do pobrania]";
+          // Dodajemy specjalną sugestię lub obsługujemy to w renderowaniu
+          botMessage.suggestions = [...(botMessage.suggestions || []), "Pobierz PDF teraz"];
+      }
 
       setMessages([...newMessages, botMessage]);
     } catch (error) {
@@ -101,7 +109,20 @@ export function ChatbotInterface() {
     }
   };
 
-  const handleSuggestionClick = (suggestion: string) => {
+  const handleSuggestionClick = async (suggestion: string) => {
+    if (suggestion === "Pobierz PDF teraz") {
+        setIsPdfGenerating(true);
+        try {
+            await generateReportPDF(data);
+            toast.success("Dokument został pobrany.");
+        } catch (e) {
+            toast.error("Błąd generowania PDF.");
+        } finally {
+            setIsPdfGenerating(false);
+        }
+        return;
+    }
+
     setInput(suggestion);
     // Opcjonalnie można od razu wysłać, ale lepiej dać użytkownikowi możliwość edycji
     // handleSend(); 
@@ -217,15 +238,26 @@ export function ChatbotInterface() {
 
                       {message.suggestions && message.suggestions.length > 0 && (
                         <div className="mt-3 flex flex-wrap gap-2">
-                          {message.suggestions.map((suggestion, index) => (
-                            <button
-                              key={index}
-                              onClick={() => handleSuggestionClick(suggestion)}
-                              className="text-sm px-3 py-1.5 bg-gray-50 text-gray-700 rounded-full hover:bg-gray-100 transition-colors border border-gray-200 text-left"
-                            >
-                              {suggestion}
-                            </button>
-                          ))}
+                          {message.suggestions.map((suggestion, index) => {
+                            const isDownload = suggestion === "Pobierz PDF teraz";
+                            return (
+                              <button
+                                key={index}
+                                onClick={() => handleSuggestionClick(suggestion)}
+                                disabled={isPdfGenerating && isDownload}
+                                className={`text-sm px-3 py-1.5 rounded-full transition-colors border text-left flex items-center gap-2 ${
+                                  isDownload 
+                                    ? "bg-blue-600 text-white border-blue-600 hover:bg-blue-700"
+                                    : "bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100"
+                                }`}
+                              >
+                                {isDownload && (
+                                    isPdfGenerating ? <Loader2 className="w-3 h-3 animate-spin"/> : <Download className="w-3 h-3"/>
+                                )}
+                                {suggestion}
+                              </button>
+                            );
+                          })}
                         </div>
                       )}
                     </div>

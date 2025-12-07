@@ -1,23 +1,13 @@
 import { useState } from 'react';
 import { useWizard } from './WizardContext';
-import { Building2, Search, CheckCircle, Loader } from 'lucide-react';
+import { Building2, Search, CheckCircle, Loader, ExternalLink } from 'lucide-react';
+import { projectId, publicAnonKey } from '../utils/supabase/info';
+import { toast } from "sonner@2.0.3";
 
 interface ReporterInfoStepProps {
   onNext: () => void;
   onPrevious: () => void;
 }
-
-// Mock dane PKD
-const mockPKDDatabase: Record<string, string> = {
-  '43.21': 'Roboty związane z budową instalacji elektrycznych i hydraulicznych oraz pozostałe instalacje budowlane',
-  '47.11': 'Sprzedaż detaliczna w niewyspecjalizowanych sklepach z przewagą żywności, napojów i wyrobów tytoniowych',
-  '62.01': 'Działalność związana z oprogramowaniem',
-  '69.20': 'Działalność rachunkowo-księgowa; doradztwo podatkowe',
-  '71.11': 'Działalność w zakresie architektury',
-  '43.99': 'Pozostała specjalistyczna działalność budowlana, gdzie indziej niesklasyfikowana',
-  '56.10': 'Restauracje i inne placówki gastronomiczne',
-  '85.51': 'Pozaszkolne formy edukacji sportowej oraz zajęć sportowych i rekreacyjnych',
-};
 
 export function BusinessInfoStep({ onNext, onPrevious }: ReporterInfoStepProps) {
   const { data, updateData } = useWizard();
@@ -43,28 +33,60 @@ export function BusinessInfoStep({ onNext, onPrevious }: ReporterInfoStepProps) 
     setIsSearching(true);
     setErrors({});
 
-    // Symulacja zapytania do CEIDG
-    setTimeout(() => {
-      // Mock dane - w rzeczywistości pobrane z CEIDG
-      const mockData = {
-        businessName: 'P.H.U. "PRZYKŁAD" Jan Kowalski',
-        businessAddress: 'ul. Przykładowa 123, 00-001 Warszawa',
-        pkdCode: Object.keys(mockPKDDatabase)[Math.floor(Math.random() * Object.keys(mockPKDDatabase).length)],
-      };
+    try {
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-1ba4d8f6/ceidg-lookup`, {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${publicAnonKey}`
+          },
+          body: JSON.stringify({ nip: formData.nip || formData.regon })
+      });
+      
+      const result = await response.json().catch(() => ({}));
+      
+      if (!response.ok) {
+          throw new Error(result.error || `Błąd serwera: ${response.status}`);
+      }
 
-      const pkdDescription = mockPKDDatabase[mockData.pkdCode] || 'Nieznana działalność';
+      // POPRAWKA: Obsługa braku firmy bez rzucania błędu
+      if (!result.name) {
+         toast.info("Nie znaleziono firmy w bazie. Proszę uzupełnić dane ręcznie.");
+         setSearchComplete(true);
+         setFormData(prev => ({
+             ...prev,
+             businessName: prev.businessName || "",
+             businessAddress: prev.businessAddress || "",
+             pkdCode: prev.pkdCode || "",
+             pkdDescription: prev.pkdDescription || ""
+         }));
+         setErrors({});
+         return;
+      }
 
       setFormData({
         ...formData,
-        businessName: mockData.businessName,
-        businessAddress: mockData.businessAddress,
-        pkdCode: mockData.pkdCode,
-        pkdDescription: pkdDescription,
+        businessName: result.name,
+        businessAddress: result.address,
+        pkdCode: result.pkd,
+        pkdDescription: result.pkdDesc,
       });
-
-      setIsSearching(false);
+      
+      if (!result.pkd) {
+          toast.warning("Pobrano dane adresowe z VIES. Kod PKD należy uzupełnić ręcznie na podstawie CEIDG.", { duration: 5000 });
+      } else {
+          toast.success("Dane firmy zostały pobrane");
+      }
       setSearchComplete(true);
-    }, 1500);
+
+    } catch (err: any) {
+        console.error("CEIDG Lookup Error:", err);
+        const msg = err.message || "Nie udało się pobrać danych";
+        setErrors({ nip: msg });
+        toast.error(msg);
+    } finally {
+        setIsSearching(false);
+    }
   };
 
   const validate = () => {
@@ -81,9 +103,9 @@ export function BusinessInfoStep({ onNext, onPrevious }: ReporterInfoStepProps) 
     if (formData.regon && !/^\d{9}$/.test(formData.regon)) {
       newErrors.regon = 'REGON musi składać się z 9 cyfr';
     }
-
-    if (!formData.pkdCode) {
-      newErrors.pkdCode = 'Należy pobrać dane z CEIDG';
+    
+    if (!formData.pkdCode && searchComplete) {
+       // warning only
     }
 
     setErrors(newErrors);
@@ -95,6 +117,17 @@ export function BusinessInfoStep({ onNext, onPrevious }: ReporterInfoStepProps) 
       updateData(formData);
       onNext();
     }
+  };
+
+  const handleSkip = () => {
+      // Pozwalamy przejść dalej mimo braków
+      // Zapisujemy to co jest (nawet puste)
+      updateData(formData);
+      toast.info("Krok pominięty. Pamiętaj o uzupełnieniu danych firmy przed finalnym złożeniem dokumentów.", {
+          duration: 4000,
+          icon: '⚠️'
+      });
+      onNext();
   };
 
   return (
@@ -248,24 +281,95 @@ export function BusinessInfoStep({ onNext, onPrevious }: ReporterInfoStepProps) 
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
+
+            <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-1">
+                    <div className="flex items-center justify-between mb-1">
+                        <label className="block text-gray-700">
+                            Kod PKD *
+                        </label>
+                        <div className="flex items-center gap-1">
+                            <a 
+                               href="https://aplikacja.ceidg.gov.pl/ceidg/ceidg.public.ui/search.aspx"
+                               target="_blank"
+                               rel="noopener noreferrer"
+                               className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 font-normal"
+                               title="Otwórz wyszukiwarkę CEIDG"
+                            >
+                              CEIDG <ExternalLink className="w-3 h-3" />
+                            </a>
+                            <span className="text-gray-300 text-xs">|</span>
+                            <a 
+                               href="https://wyszukiwarkaregon.stat.gov.pl/appBIR/index.aspx"
+                               target="_blank"
+                               rel="noopener noreferrer"
+                               className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 font-normal"
+                               title="Otwórz wyszukiwarkę GUS (REGON)"
+                            >
+                              GUS <ExternalLink className="w-3 h-3" />
+                            </a>
+                        </div>
+                    </div>
+                    <input
+                        type="text"
+                        value={formData.pkdCode}
+                        onChange={(e) => setFormData({ ...formData, pkdCode: e.target.value })}
+                        placeholder="np. 41.20.Z"
+                        className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${!formData.pkdCode ? 'border-amber-300 bg-amber-50' : 'border-gray-300'}`}
+                    />
+                </div>
+                <div className="col-span-2">
+                    <label className="block text-gray-700 mb-1">
+                        Opis działalności (PKD) *
+                    </label>
+                    <input
+                        type="text"
+                        value={formData.pkdDescription}
+                        onChange={(e) => setFormData({ ...formData, pkdDescription: e.target.value })}
+                        placeholder="np. Roboty budowlane..."
+                        className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent ${!formData.pkdDescription ? 'border-amber-300 bg-amber-50' : 'border-gray-300'}`}
+                    />
+                </div>
+            </div>
+            
+            {!formData.pkdCode && (
+                <div className="bg-amber-50 text-amber-800 text-sm p-3 rounded-md border border-amber-200 flex items-start gap-2">
+                    <div className="mt-0.5">ℹ️</div>
+                    <p>
+                        <strong>Uwaga:</strong> Rejestr VIES nie udostępnia kodów PKD. 
+                        Wyszukaj firmę w <strong>CEIDG</strong> lub <strong>GUS</strong> (linki powyżej) i przepisz główny kod PKD, 
+                        aby system mógł poprawnie zweryfikować okoliczności wypadku.
+                    </p>
+                </div>
+            )}
           </div>
         </div>
       )}
 
-      <div className="flex justify-between pt-4">
+      <div className="flex justify-between pt-4 items-center">
         <button
           onClick={onPrevious}
           className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
         >
           Wstecz
         </button>
-        <button
-          onClick={handleContinue}
-          disabled={!searchComplete}
-          className="bg-blue-600 text-white px-8 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
-        >
-          Dalej
-        </button>
+        
+        <div className="flex items-center gap-4">
+            <button
+                onClick={handleSkip}
+                className="text-gray-500 hover:text-gray-700 text-sm font-medium underline decoration-dotted underline-offset-4 hover:decoration-solid transition-all"
+            >
+                Nie mam teraz danych (uzupełnij później)
+            </button>
+            
+            <button
+            onClick={handleContinue}
+            disabled={!searchComplete}
+            className="bg-blue-600 text-white px-8 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+            >
+            Dalej
+            </button>
+        </div>
       </div>
     </div>
   );

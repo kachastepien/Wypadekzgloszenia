@@ -59,6 +59,14 @@ export interface WizardData {
     name: string;
     contact: string;
   }>;
+
+  // Informacje BHP i Techniczne (Dla wyjaśnień)
+  safetyInfo?: {
+    trainings?: string;
+    protectiveGear?: string;
+    machineStatus?: string;
+    sobriety?: string;
+  };
   
   // Brakujące elementy
   missingElements: string[];

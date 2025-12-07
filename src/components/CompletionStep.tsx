@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { useWizard } from './WizardContext';
-import { Download, FileText, CheckCircle, Mail, Building2, Printer } from 'lucide-react';
-import jsPDF from 'jspdf';
+import { Download, CheckCircle, Loader2, AlertCircle, CloudUpload, AlertTriangle } from 'lucide-react';
+import { projectId, publicAnonKey } from '../utils/supabase/info';
+import { generateReportPDF } from '../utils/pdfGenerator';
 
 interface CompletionStepProps {
   onPrevious: () => void;
@@ -8,166 +10,67 @@ interface CompletionStepProps {
 
 export function CompletionStep({ onPrevious }: CompletionStepProps) {
   const { data } = useWizard();
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
-  const generateDocumentText = () => {
-    let document = '';
+  const missingFields: string[] = [];
+  if (!data.nip && !data.regon) missingFields.push("NIP/REGON Firmy");
+  if (!data.pkdCode) missingFields.push("Kod PKD");
+  if (!data.injuredName) missingFields.push("Imię Poszkodowanego");
+  if (!data.injuredSurname) missingFields.push("Nazwisko Poszkodowanego");
+  if (!data.injuredPesel) missingFields.push("PESEL Poszkodowanego");
+  if (!data.accidentDate) missingFields.push("Data wypadku");
+  if (!data.accidentLocation) missingFields.push("Miejsce wypadku");
 
-    // Nagłówek
-    document += '═══════════════════════════════════════════════════════════\n';
-    document += '          ZAWIADOMIENIE O WYPADKU PRZY PRACY\n';
-    document += '    dla osoby prowadzącej pozarolniczą działalność gospodarczą\n';
-    document += '═══════════════════════════════════════════════════════════\n\n';
+  // Automatyczny zapis po wejściu na ten krok (tylko raz)
+  useState(() => {
+      const saveReport = async () => {
+          if (saveStatus !== 'idle') return;
+          setIsSaving(true);
+          try {
+              // Przygotuj payload
+              const payload = {
+                  ...data,
+                  status: 'Analiza', // Domyślny status dla Eksperta
+                  createdAt: new Date().toISOString()
+              };
 
-    // Dane zgłaszającego
-    if (data.isProxy) {
-      document += 'ZGŁASZAJĄCY (PEŁNOMOCNIK):\n';
-      document += `Imię i nazwisko: ${data.proxyName}\n`;
-      document += `Relacja z poszkodowanym: ${data.proxyRelation}\n`;
-      document += `Pełnomocnictwo: ${data.hasProxyDocument ? 'TAK (załączone)' : 'NIE (do dostarczenia)'}\n\n`;
-    }
+              const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-1ba4d8f6/report`, {
+                  method: 'POST',
+                  headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${publicAnonKey}`
+                  },
+                  body: JSON.stringify(payload)
+              });
 
-    // Dane poszkodowanego
-    document += 'DANE POSZKODOWANEGO:\n';
-    document += `Imię i nazwisko: ${data.injuredName} ${data.injuredSurname}\n`;
-    document += `PESEL: ${data.injuredPesel}\n`;
-    if (data.injuredEmail) document += `Email: ${data.injuredEmail}\n`;
-    if (data.injuredPhone) document += `Telefon: ${data.injuredPhone}\n`;
-    document += '\n';
+              if (response.ok) {
+                  setSaveStatus('success');
+                  console.log("Zgłoszenie zapisane w systemie.");
+              } else {
+                  console.error("Błąd zapisu zgłoszenia:", await response.text());
+                  setSaveStatus('error');
+              }
+          } catch (e) {
+              console.error("Network error saving report:", e);
+              setSaveStatus('error');
+          } finally {
+              setIsSaving(false);
+          }
+      };
 
-    // Dane działalności
-    document += 'DANE DZIAŁALNOŚCI GOSPODARCZEJ:\n';
-    document += `Nazwa: ${data.businessName}\n`;
-    document += `NIP: ${data.nip}\n`;
-    if (data.regon) document += `REGON: ${data.regon}\n`;
-    document += `Adres: ${data.businessAddress}\n`;
-    document += `Kod PKD: ${data.pkdCode} - ${data.pkdDescription}\n`;
-    document += '\n';
+      saveReport();
+  });
 
-    // Dane wypadku
-    document += 'DANE WYPADKU:\n';
-    const accidentDateFormatted = new Date(data.accidentDate).toLocaleDateString('pl-PL');
-    document += `Data: ${accidentDateFormatted}\n`;
-    document += `Godzina: ${data.accidentTime}\n`;
-    document += `Miejsce: ${data.accidentLocation}\n`;
-    document += '\n';
-
-    // Okoliczności
-    document += 'OKOLICZNOŚCI WYPADKU:\n';
-    document += `Związek z działalnością gospodarczą: ${data.wasWorkRelated === 'tak' ? 'TAK' : 'NIE'}\n`;
-    document += `Nagłość zdarzenia: ${data.wasSudden === 'tak' ? 'TAK' : 'NIE'}\n\n`;
-
-    document += 'Czynności wykonywane przed wypadkiem:\n';
-    document += `${data.activityBeforeAccident}\n\n`;
-
-    // Przebieg wypadku
-    document += 'PRZEBIEG WYPADKU (SEKWENCJA ZDARZEŃ):\n';
-    data.accidentSequence.forEach((step) => {
-      document += `\nKrok ${step.step}${step.time ? ` (godz. ${step.time})` : ''}:\n`;
-      document += `${step.description}\n`;
-    });
-    document += '\n';
-
-    // Przyczyna
-    document += 'PRZYCZYNA WYPADKU:\n';
-    document += `Przyczyna zewnętrzna: ${data.externalCause}\n\n`;
-    document += 'Szczegółowy opis przyczyny:\n';
-    document += `${data.causeDetails}\n\n`;
-
-    // Obrażenia
-    document += 'OBRAŻENIA:\n';
-    document += `Rodzaj: ${data.injuryType}\n`;
-    document += `Lokalizacja: ${data.injuryLocation}\n\n`;
-    document += 'Szczegółowy opis:\n';
-    document += `${data.injuryDescription}\n\n`;
-
-    // Pomoc medyczna
-    document += `Pomoc medyczna: ${data.medicalAttention === 'tak' ? 'TAK' : 'NIE'}\n`;
-    if (data.medicalAttention === 'tak' && data.hospitalName) {
-      document += `Placówka: ${data.hospitalName}\n`;
-    }
-    document += '\n';
-
-    // Świadkowie
-    if (data.witnesses.length > 0) {
-      document += 'ŚWIADKOWIE:\n';
-      data.witnesses.forEach((witness, index) => {
-        document += `${index + 1}. ${witness.name}`;
-        if (witness.contact) document += ` - kontakt: ${witness.contact}`;
-        document += '\n';
-      });
-      document += '\n';
-    }
-
-    // Dokumenty do załączenia
-    if (data.requiredDocuments.length > 0) {
-      document += 'DOKUMENTY DO ZAŁĄCZENIA:\n';
-      data.requiredDocuments.forEach((doc, index) => {
-        document += `${index + 1}. ${doc}\n`;
-      });
-      document += '\n';
-    }
-
-    // Stopka
-    document += '\n═══════════════════════════════════════════════════════════\n';
-    document += `Data wygenerowania: ${new Date().toLocaleDateString('pl-PL')} ${new Date().toLocaleTimeString('pl-PL')}\n`;
-    document += '\n';
-    document += 'WAŻNE:\n';
-    document += '1. Przeczytaj dokument i sprawdź poprawność danych\n';
-    document += '2. Podpisz dokument\n';
-    document += '3. Dołącz wymagane dokumenty\n';
-    document += '4. Prześlij przez PUE/eZUS lub dostarcz do ZUS\n';
-    document += '═══════════════════════════════════════════════════════════\n';
-
-    return document;
-  };
-
-  const downloadTXT = () => {
-    const text = generateDocumentText();
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Zawiadomienie_wypadek_${data.injuredSurname}_${new Date().toISOString().split('T')[0]}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const downloadPDF = () => {
-    const doc = new jsPDF();
-    const text = generateDocumentText();
-    
-    // Konfiguracja czcionki
-    doc.setFont('helvetica');
-    doc.setFontSize(10);
-
-    // Podział tekstu na linie
-    const lines = text.split('\n');
-    const pageHeight = doc.internal.pageSize.height;
-    let y = 15;
-
-    lines.forEach((line) => {
-      if (y > pageHeight - 20) {
-        doc.addPage();
-        y = 15;
-      }
-      doc.text(line, 15, y);
-      y += 5;
-    });
-
-    doc.save(`Zawiadomienie_wypadek_${data.injuredSurname}_${new Date().toISOString().split('T')[0]}.pdf`);
-  };
-
-  const printDocument = () => {
-    const text = generateDocumentText();
-    const printWindow = window.open('', '', 'height=600,width=800');
-    if (printWindow) {
-      printWindow.document.write('<html><head><title>Zawiadomienie o wypadku</title>');
-      printWindow.document.write('<style>body { font-family: monospace; white-space: pre-wrap; padding: 20px; }</style>');
-      printWindow.document.write('</head><body>');
-      printWindow.document.write(text);
-      printWindow.document.write('</body></html>');
-      printWindow.document.close();
-      printWindow.print();
+  const handleGeneratePDF = async () => {
+    setIsGenerating(true);
+    try {
+      await generateReportPDF(data);
+    } catch (error) {
+      alert("Wystąpił błąd podczas generowania PDF. Spróbuj ponownie.");
+    } finally {
+      setIsGenerating(false);
     }
   };
 
@@ -178,113 +81,73 @@ export function CompletionStep({ onPrevious }: CompletionStepProps) {
           <CheckCircle className="w-10 h-10 text-green-600" />
         </div>
         <h2 className="text-green-900 mb-2">Zgłoszenie gotowe!</h2>
+        
+        {/* Status zapisu do systemu */}
+        <div className="flex items-center justify-center gap-2 mb-4 h-6">
+            {isSaving && <span className="text-sm text-blue-600 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin"/> Przesyłanie do ZUS...</span>}
+            {saveStatus === 'success' && <span className="text-sm text-green-600 flex items-center gap-1"><CloudUpload className="w-3 h-3"/> Zarejestrowano w systemie</span>}
+            {saveStatus === 'error' && <span className="text-sm text-red-500">Błąd zapisu online (PDF nadal dostępny)</span>}
+        </div>
+
         <p className="text-gray-700 max-w-2xl mx-auto">
-          Dokument został wygenerowany. Pobierz go, sprawdź poprawność danych, 
-          podpisz i wyślij do ZUS wraz z wymaganymi dokumentami.
+          Dane zostały przetworzone. Pobierz gotowy dokument PDF do wydruku i podpisu.
         </p>
       </div>
 
-      {/* Podgląd dokumentu */}
-      <div className="bg-white border border-gray-200 rounded-lg p-6">
-        <h3 className="text-gray-900 mb-4 flex items-center gap-2">
-          <FileText className="w-5 h-5 text-blue-600" />
-          Podgląd dokumentu
-        </h3>
-        <div className="bg-gray-50 border border-gray-300 rounded p-4 max-h-96 overflow-y-auto">
-          <pre className="text-sm whitespace-pre-wrap font-mono text-gray-800">
-            {generateDocumentText()}
-          </pre>
-        </div>
-      </div>
-
-      {/* Opcje pobierania */}
       <div className="bg-white border border-gray-200 rounded-lg p-6">
         <h3 className="text-gray-900 mb-4">Pobierz dokument</h3>
-        <div className="grid md:grid-cols-3 gap-4">
+        
+        {missingFields.length > 0 && (
+            <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-2 text-red-800 font-bold">
+                    <AlertTriangle className="w-5 h-5" />
+                    <h4>Wymagane uzupełnienie danych</h4>
+                </div>
+                <p className="text-sm text-red-700 mb-2">
+                    Twoje zgłoszenie zostało przyjęte do systemu, ale wygenerowany PDF będzie niekompletny. 
+                    Przed wysłaniem dokumentu do ZUS musisz ręcznie uzupełnić następujące pola:
+                </p>
+                <ul className="list-disc list-inside text-sm text-red-700 space-y-1 ml-2">
+                    {missingFields.map((field, i) => (
+                        <li key={i}>{field}</li>
+                    ))}
+                </ul>
+            </div>
+        )}
+
+        <div className="grid md:grid-cols-2 gap-4">
           <button
-            onClick={downloadPDF}
+            onClick={handleGeneratePDF}
+            disabled={isGenerating}
             className="flex flex-col items-center gap-3 p-6 border-2 border-blue-600 rounded-lg hover:bg-blue-50 transition-colors"
           >
-            <Download className="w-8 h-8 text-blue-600" />
+            {isGenerating ? (
+              <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+            ) : (
+              <Download className="w-8 h-8 text-blue-600" />
+            )}
             <div className="text-center">
-              <p className="text-gray-900">Pobierz PDF</p>
-              <p className="text-sm text-gray-600">Format do podpisu</p>
+              <p className="text-gray-900 font-medium">Pobierz PDF</p>
+              <p className="text-sm text-gray-600">Gotowy do wydruku</p>
             </div>
           </button>
 
-          <button
-            onClick={downloadTXT}
-            className="flex flex-col items-center gap-3 p-6 border-2 border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            <FileText className="w-8 h-8 text-gray-600" />
-            <div className="text-center">
-              <p className="text-gray-900">Pobierz TXT</p>
-              <p className="text-sm text-gray-600">Format edytowalny</p>
+          <div className="p-4 bg-amber-50 border border-amber-100 rounded-lg text-sm text-amber-800">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+              <p>
+                <strong>Uwaga:</strong> Wygenerowany plik jest sformatowany do druku. 
+                Polskie znaki zostały zastąpione odpowiednikami (np. ą - a) dla zachowania kompatybilności.
+                <br/><br/>
+                Po wydrukowaniu możesz uzupełnić brakujące ogonki ręcznie lub złożyć dokument w tej formie (jest czytelny i akceptowalny w trybie awaryjnym).
+              </p>
             </div>
-          </button>
-
-          <button
-            onClick={printDocument}
-            className="flex flex-col items-center gap-3 p-6 border-2 border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-          >
-            <Printer className="w-8 h-8 text-gray-600" />
-            <div className="text-center">
-              <p className="text-gray-900">Drukuj</p>
-              <p className="text-sm text-gray-600">Wydruk dokumentu</p>
-            </div>
-          </button>
+          </div>
         </div>
       </div>
 
-      {/* Kolejne kroki */}
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-        <h3 className="text-blue-900 mb-4">Kolejne kroki</h3>
-        <ol className="space-y-3">
-          <li className="flex items-start gap-3">
-            <span className="flex items-center justify-center w-6 h-6 bg-blue-600 text-white rounded-full flex-shrink-0 mt-0.5">
-              1
-            </span>
-            <div>
-              <p className="text-gray-900">Pobierz i przeczytaj dokument</p>
-              <p className="text-gray-600">Sprawdź poprawność wszystkich danych</p>
-            </div>
-          </li>
-
-          <li className="flex items-start gap-3">
-            <span className="flex items-center justify-center w-6 h-6 bg-blue-600 text-white rounded-full flex-shrink-0 mt-0.5">
-              2
-            </span>
-            <div>
-              <p className="text-gray-900">Podpisz dokument</p>
-              <p className="text-gray-600">Podpis własnoręczny na wydrukowanym dokumencie</p>
-            </div>
-          </li>
-
-          <li className="flex items-start gap-3">
-            <span className="flex items-center justify-center w-6 h-6 bg-blue-600 text-white rounded-full flex-shrink-0 mt-0.5">
-              3
-            </span>
-            <div>
-              <p className="text-gray-900">Przygotuj wymagane dokumenty</p>
-              <p className="text-gray-600">Zobacz listę poniżej</p>
-            </div>
-          </li>
-
-          <li className="flex items-start gap-3">
-            <span className="flex items-center justify-center w-6 h-6 bg-blue-600 text-white rounded-full flex-shrink-0 mt-0.5">
-              4
-            </span>
-            <div>
-              <p className="text-gray-900">Wyślij do ZUS</p>
-              <p className="text-gray-600">Przez PUE/eZUS lub osobiście w placówce</p>
-            </div>
-          </li>
-        </ol>
-      </div>
-
-      {/* Wymagane dokumenty */}
       <div className="bg-white border border-gray-200 rounded-lg p-6">
-        <h3 className="text-gray-900 mb-4">Dokumenty do załączenia</h3>
+        <h3 className="text-gray-900 mb-4">Lista załączników</h3>
         <div className="space-y-2">
           {data.requiredDocuments.map((doc, index) => (
             <div key={index} className="flex items-start gap-3 p-3 bg-gray-50 rounded">
@@ -293,59 +156,6 @@ export function CompletionStep({ onPrevious }: CompletionStepProps) {
             </div>
           ))}
         </div>
-      </div>
-
-      {/* Sposoby wysyłki */}
-      <div className="bg-white border border-gray-200 rounded-lg p-6">
-        <h3 className="text-gray-900 mb-4">Sposoby złożenia zgłoszenia</h3>
-        <div className="grid md:grid-cols-2 gap-4">
-          <div className="p-4 border border-gray-200 rounded-lg">
-            <div className="flex items-center gap-3 mb-2">
-              <Mail className="w-6 h-6 text-blue-600" />
-              <h4 className="text-gray-900">Elektronicznie</h4>
-            </div>
-            <p className="text-gray-700 mb-2">
-              Zaloguj się na platformie PUE ZUS lub eZUS i wyślij zeskanowany, 
-              podpisany dokument wraz z załącznikami.
-            </p>
-            <a
-              href="https://www.zus.pl/pue"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-600 hover:underline"
-            >
-              Przejdź do PUE ZUS →
-            </a>
-          </div>
-
-          <div className="p-4 border border-gray-200 rounded-lg">
-            <div className="flex items-center gap-3 mb-2">
-              <Building2 className="w-6 h-6 text-blue-600" />
-              <h4 className="text-gray-900">Osobiście</h4>
-            </div>
-            <p className="text-gray-700 mb-2">
-              Dostarcz podpisany dokument wraz z załącznikami do dowolnej 
-              placówki ZUS w Polsce.
-            </p>
-            <a
-              href="https://www.zus.pl/o-zus/kontakt/oddzialy-i-inspektoraty"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-600 hover:underline"
-            >
-              Znajdź placówkę ZUS →
-            </a>
-          </div>
-        </div>
-      </div>
-
-      {/* Kontakt */}
-      <div className="bg-amber-50 border border-amber-200 rounded-lg p-6">
-        <h3 className="text-amber-900 mb-2">Potrzebujesz pomocy?</h3>
-        <p className="text-gray-700">
-          W razie pytań dotyczących zgłoszenia wypadku skontaktuj się z najbliższą 
-          placówką ZUS lub zadzwoń na infolinię: <strong>22 560 16 00</strong>
-        </p>
       </div>
 
       <div className="flex justify-between pt-4">

@@ -55,6 +55,12 @@ export function ReporterInfoStep({ onNext, onPrevious }: ReporterInfoStepProps) 
     }
   };
 
+  const handleSkip = () => {
+      // Zapisujemy częściowe dane
+      updateData(formData);
+      onNext();
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -243,19 +249,28 @@ export function ReporterInfoStep({ onNext, onPrevious }: ReporterInfoStepProps) 
         </div>
       </div>
 
-      <div className="flex justify-between pt-4">
+      <div className="flex justify-between pt-4 items-center">
         <button
           onClick={onPrevious}
           className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
         >
           Wstecz
         </button>
-        <button
-          onClick={handleContinue}
-          className="bg-blue-600 text-white px-8 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          Dalej
-        </button>
+
+        <div className="flex items-center gap-4">
+            <button
+                onClick={handleSkip}
+                className="text-gray-500 hover:text-gray-700 text-sm font-medium underline decoration-dotted underline-offset-4 hover:decoration-solid transition-all"
+            >
+                Uzupełnij później
+            </button>
+            <button
+            onClick={handleContinue}
+            className="bg-blue-600 text-white px-8 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+            >
+            Dalej
+            </button>
+        </div>
       </div>
     </div>
   );
